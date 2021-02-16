@@ -6,6 +6,7 @@ var template = require('./lib/template.js');
 var path = require('path');
 var sanitizeHtml = require('sanitize-html');
 var mysql = require('mysql');
+const { debugPort } = require('process');
 
 var db = mysql.createConnection({
     host: 'localhost',
@@ -23,66 +24,90 @@ var app = http.createServer(function(request, response) {
     if (pathname === '/') {
         if (queryData.id === undefined) {
             // home
+            db.query(`SELECT * FROM topic`, function(error, topics) {
+                var title = 'Welcome';
+                var description = 'Hello, Node.js';
+                var list = template.list(topics);
+                var html = template.HTML(title, list,
+                    `<h2>${title}</h2>${description}`,
+                    `<a href="/create">create</a>`
+                );
+                response.writeHead(200);
+                response.end(html);
+            });
+        } else {
+            // Detail Content
 
             // fs.readdir('./data', function(error, filelist) {
-            //     var title = 'Welcome';
-            //     var description = 'Hello, Node.js';
-            //     var list = template.list(filelist);
-            //     var html = template.HTML(title, list,
-            //         `<h2>${title}</h2>${description}`,
-            //         `<a href="/create">create</a>`
-            //     );
-            //     response.writeHead(200);
-            //     response.end(html);
+            //     var filteredId = path.parse(queryData.id).base;
+            //     fs.readFile(`data/${filteredId}`, 'utf8', function(err, description) {
+            //         var title = queryData.id;
+            //         var sanitizedTitle = sanitizeHtml(title);
+            //         var sanitizedDescription = sanitizeHtml(description, {
+            //             allowedTags: ['h1']
+            //         });
+            //         var list = template.list(filelist);
+            //         var html = template.HTML(sanitizedTitle, list,
+            //             `<h2>${sanitizedTitle}</h2>${sanitizedDescription}`,
+            //             ` <a href="/create">create</a>
+            //     <a href="/update?id=${sanitizedTitle}">update</a>
+            //     <form action="delete_process" method="post">
+            //       <input type="hidden" name="id" value="${sanitizedTitle}">
+            //       <input type="submit" value="delete">
+            //     </form>`
+            //         );
+            //         response.writeHead(200);
+            //         response.end(html);
+            //     });
             // });
 
-            // 실패일 때는 에러가 담기고, 성공일 때는 result에 그 값이 담긴다.
-            db.query('SELECT * FROM topic', function(err, topics) {
-                console.log(topics);
-                response.writeHead(200);
-                response.end(`success`);
-            });
+            // 1. 글 목록 가져오기
 
-            db.end();
-        } else {
-            fs.readdir('./data', function(error, filelist) {
-                var filteredId = path.parse(queryData.id).base;
-                fs.readFile(`data/${filteredId}`, 'utf8', function(err, description) {
-                    var title = queryData.id;
-                    var sanitizedTitle = sanitizeHtml(title);
-                    var sanitizedDescription = sanitizeHtml(description, {
-                        allowedTags: ['h1']
-                    });
-                    var list = template.list(filelist);
-                    var html = template.HTML(sanitizedTitle, list,
-                        `<h2>${sanitizedTitle}</h2>${sanitizedDescription}`,
-                        ` <a href="/create">create</a>
-                <a href="/update?id=${sanitizedTitle}">update</a>
-                <form action="delete_process" method="post">
-                  <input type="hidden" name="id" value="${sanitizedTitle}">
-                  <input type="submit" value="delete">
-                </form>`
+            db.query(`SELECT * FROM topic`, function(error, topics) {
+                if (error) {
+                    throw error;
+                }
+                // -> ? 로 queryData.id가 formatting 되는데 이 때 공격받는 코드를 처리해준다.
+                db.query(`SELECT * FROM topic WHERE id=?`, [queryData.id], function(error2, topic) {
+                    if (error2) {
+                        throw error2;
+                    }
+                    console.log(topic);
+                    var title = topic[0].title;
+                    var description = topic[0].description;
+                    var list = template.list(topics);
+                    var html = template.HTML(title, list,
+                        `<h2>${title}</h2>${description}`,
+                        `<a href="/create">create</a>
+                        <a href="/update?id=${queryData.id}">update</a>
+                        <form action="delete_process" method="post">
+                          <input type="hidden" name="id" value="${queryData.id}">
+                          <input type="submit" value="delete">
+                        </form>`
                     );
                     response.writeHead(200);
                     response.end(html);
                 });
             });
+
         }
     } else if (pathname === '/create') {
-        fs.readdir('./data', function(error, filelist) {
-            var title = 'WEB - create';
-            var list = template.list(filelist);
-            var html = template.HTML(title, list, `
-          <form action="/create_process" method="post">
-            <p><input type="text" name="title" placeholder="title"></p>
-            <p>
-              <textarea name="description" placeholder="description"></textarea>
-            </p>
-            <p>
-              <input type="submit">
-            </p>
-          </form>
-        `, '');
+        db.query(`SELECT * FROM topic`, function(error, topics) {
+            var title = 'Create';
+            var description = 'Hello, Node.js';
+            var list = template.list(topics);
+            var html = template.HTML(title, list,
+                `
+              <form action="/create_process" method="post">
+                <p><input type="text" name="title" placeholder="title"></p>
+                <p>
+                  <textarea name="description" placeholder="description"></textarea>
+                </p>
+                <p>
+                  <input type="submit">
+                </p>
+              </form>
+            `, '');
             response.writeHead(200);
             response.end(html);
         });
@@ -93,13 +118,18 @@ var app = http.createServer(function(request, response) {
         });
         request.on('end', function() {
             var post = qs.parse(body);
-            var title = post.title;
-            var description = post.description;
-            fs.writeFile(`data/${title}`, description, 'utf8', function(err) {
-                response.writeHead(302, { Location: `/?id=${title}` });
-                response.end();
-            })
-        });
+            db.query(`
+              insert into topic (title, description, created, author_id) 
+              values(?, ?, NOW(), ?)`, [post.title, post.description, 1],
+                function(error, result) {
+                    if (error) {
+                        throw error;
+                    }
+                    response.writeHead(302, { Location: `/?id=${result.insertId}` });
+                    response.end();
+                }
+            )
+        })
     } else if (pathname === '/update') {
         fs.readdir('./data', function(error, filelist) {
             var filteredId = path.parse(queryData.id).base;
@@ -108,17 +138,17 @@ var app = http.createServer(function(request, response) {
                 var list = template.list(filelist);
                 var html = template.HTML(title, list,
                     `
-            <form action="/update_process" method="post">
-              <input type="hidden" name="id" value="${title}">
-              <p><input type="text" name="title" placeholder="title" value="${title}"></p>
-              <p>
-                <textarea name="description" placeholder="description">${description}</textarea>
-              </p>
-              <p>
-                <input type="submit">
-              </p>
-            </form>
-            `,
+                  <form action="/update_process" method="post">
+                    <input type="hidden" name="id" value="${title}">
+                    <p><input type="text" name="title" placeholder="title" value="${title}"></p>
+                    <p>
+                      <textarea name="description" placeholder="description">${description}</textarea>
+                    </p>
+                    <p>
+                      <input type="submit">
+                    </p>
+                  </form>
+                  `,
                     `<a href="/create">create</a> <a href="/update?id=${title}">update</a>`
                 );
                 response.writeHead(200);
