@@ -44,15 +44,19 @@ var app = http.createServer(function(request, response) {
                     throw error;
                 }
                 // -> ? 로 queryData.id가 formatting 되는데 이 때 공격받는 코드를 처리해준다.
-                db.query(`SELECT * FROM topic WHERE id=?`, [queryData.id], function(error2, topic) {
+                db.query(`SELECT * FROM topic LEFT JOIN author ON topic.author_id=author.id WHERE topic.id=?`, [queryData.id], function(error2, topic) {
                     if (error2) {
                         throw error2;
                     }
+                    console.log(topic);
                     var title = topic[0].title;
                     var description = topic[0].description;
                     var list = template.list(topics);
                     var html = template.HTML(title, list,
-                        `<h2>${title}</h2>${description}`,
+                        `<h2>${title}</h2>
+                        ${description}
+                        <p>by ${topic[0].name}</p>
+                        `,
                         `<a href="/create">create</a>
                         <a href="/update?id=${queryData.id}">update</a>
                         <form action="delete_process" method="post">
@@ -95,7 +99,7 @@ var app = http.createServer(function(request, response) {
             var post = qs.parse(body);
             db.query(`
               insert into topic (title, description, created, author_id) 
-              values(?, ?, NOW(), ?)`, [post.title, post.description, 1],
+              values(?, ?, NOW(), ?)`, [post.title, post.description, 1], // 1 : author id
                 function(error, result) {
                     if (error) {
                         throw error;
